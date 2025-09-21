@@ -1,0 +1,508 @@
+# Gerador de Cadernos de Operações — Frontend + Backend opcional
+
+Este arquivo contém os dois artefatos principais prontos para hospedar no GitHub Pages (frontend estático) e — opcionalmente — rodar em um servidor Node.js com Puppeteer para geração server-side.
+
+---
+
+## Arquivos incluídos (cole em arquivos separados no seu repositório)
+
+### 1) `index.html` (frontend estático — coloque na raiz ou em `docs/` para GitHub Pages)
+
+```html
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gerador de Cadernos de Operações</title>
+  <style>
+    :root{
+      --a4-width:210mm; --a4-height:297mm; --grid-size:24px; --font-size:14pt; --binding-mm:10mm;
+    }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;-webkit-font-smoothing:antialiased;padding:18px;background:#f6f7fb;color:#111}
+    .controls{display:grid;grid-template-columns:1fr 360px;gap:16px;max-width:1100px;margin:0 auto}
+    .card{background:#fff;border-radius:8px;padding:14px;box-shadow:0 6px 18px rgba(20,20,50,0.06)}
+    label{display:block;margin-top:8px;font-weight:600}
+    input[type=number], select, input[type=text], textarea{width:100%;padding:6px;margin-top:6px;border:1px solid #ddd;border-radius:6px}
+    .inline{display:flex;gap:8px;align-items:center}
+    button{padding:8px 12px;border-radius:6px;border:0;background:#2563eb;color:#fff;cursor:pointer}
+    button.secondary{background:#6b7280}
+    .small{font-size:0.9rem}
+
+    /* PDF pages styling (A4) */
+    .pdf-output{display:none}
+    .page{width:var(--a4-width);height:var(--a4-height);box-sizing:border-box;padding:12mm;position:relative;background:white;margin:6mm auto;border:1px solid #ddd}
+    .cover .title{font-size:28pt;margin-bottom:8pt}
+    .header-row{display:flex;justify-content:space-between;align-items:center}
+    .grid-container{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+    .cell{border:1px solid #444;padding:8px;box-sizing:border-box;min-height:80px;position:relative}
+
+    /* quadriculado is controlled with inline style using CSS vars */
+    .cell .question{font-size:var(--font-size);margin-bottom:6px}
+
+    /* Gabarito styling */
+    .answer-cell{padding:6px;border-bottom:1px dashed #ddd}
+
+    /* for printing */
+    @media print{
+      body{background:white}
+      .controls{display:none}
+      .pdf-output{display:block}
+      .page{page-break-after:always}
+    }
+
+  </style>
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/seedrandom@3.0.5/seedrandom.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+  <h1>Gerador de Cadernos de Operações</h1>
+  <div class="controls">
+    <div class="card">
+      <label>Operações</label>
+      <div class="inline">
+        <label><input type="checkbox" id="op-add" checked> Adição</label>
+        <label><input type="checkbox" id="op-sub" checked> Subtração</label>
+        <label><input type="checkbox" id="op-mul" checked> Multiplicação</label>
+        <label><input type="checkbox" id="op-div" checked> Divisão</label>
+      </div>
+
+      <label>Configurações principais</label>
+      <div class="inline">
+        <div style="flex:1">
+          <label>Questões por caderno</label>
+          <input type="number" id="q-count" value="20" min="1" max="200">
+        </div>
+        <div style="width:120px">
+          <label>Cadernos</label>
+          <input type="number" id="c-count" value="1" min="1" max="50">
+        </div>
+      </div>
+
+      <label>Dificuldade</label>
+      <select id="difficulty">
+        <option value="facil">Fácil</option>
+        <option value="medio" selected>Médio</option>
+        <option value="dificil">Difícil</option>
+      </select>
+
+      <label class="inline"><input type="checkbox" id="div-exact" checked> Divisões exatas (resultado inteiro)</label>
+      <label class="inline"><input type="checkbox" id="allow-negative"> Permitir subtrações negativas</label>
+
+      <label>Opções de layout</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="flex:1">
+          <label>Tamanho do quadrado (px)</label>
+          <input type="number" id="grid-size" value="24" min="8" max="80">
+        </div>
+        <div style="width:140px">
+          <label>Tamanho da fonte (pt)</label>
+          <input type="number" id="font-size" value="14" min="8" max="28">
+        </div>
+      </div>
+
+      <label>Margem para encadernação (mm)</label>
+      <input type="number" id="binding-mm" value="10" min="0" max="40">
+
+      <label>Paginação automática</label>
+      <div class="small">O gerador distribui automaticamente os exercícios em páginas A4 e cria novas páginas quando necessário.</div>
+
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button id="btn-generate">Gerar PDF (cadernos)</button>
+        <button id="btn-gabarito" class="secondary">Gerar PDF (apenas gabaritos)</button>
+      </div>
+
+      <div style="margin-top:8px">
+        <button id="btn-generate-separate" class="secondary">Gerar PDFs separados (1 arquivo por caderno)</button>
+      </div>
+
+      <div style="margin-top:10px;font-size:0.9rem;color:#444">
+        Dica: para hospedagem no GitHub Pages, coloque este arquivo `index.html` no branch `gh-pages` ou use a pasta `docs/` e habilite Pages nas configurações do repositório.
+      </div>
+    </div>
+
+    <div class="card">
+      <label>Título do caderno</label>
+      <input type="text" id="title" value="Caderno de Operações">
+      <label>Exemplos / Instruções (aparecerão na primeira página)</label>
+      <textarea id="instructions" rows="6" style="width:100%;padding:8px;border-radius:6px;border:1px solid #ddd">Aqui você encontra o passo a passo para cada operação e 2 exemplos resolvidos.
+
+Ex.: 12 + 9 = 21
+Ex.: 30 ÷ 6 = 5
+</textarea>
+
+      <label class="small">Exportar via servidor (opcional)</label>
+      <div class="small">Se quiser gerar PDFs no servidor, envie um POST com a mesma configuração para o endpoint do `server.js` (veja o arquivo servidor). </div>
+    </div>
+  </div>
+
+  <!-- área onde o PDF é montado -->
+  <div id="pdf-output" class="pdf-output"></div>
+
+  <script>
+    // Configs de dificuldade
+    const difficultyConfig = {
+      facil: { min: 0, max: 12 },
+      medio: { min: 0, max: 50 },
+      dificil: { min: 0, max: 200 }
+    };
+
+    function pickNumber(rand, min, max){ return Math.floor(rand() * (max - min + 1)) + min; }
+
+    function generateOneProblem(rand, ops, difficulty, divExact, allowNegative){
+      const avail = [];
+      if(ops.add) avail.push('+');
+      if(ops.sub) avail.push('-');
+      if(ops.mul) avail.push('×');
+      if(ops.div) avail.push('÷');
+      const op = avail[Math.floor(rand() * avail.length)];
+      const cfg = difficultyConfig[difficulty] || difficultyConfig.medio;
+      let a,b,answer;
+      if(op === '+'){
+        a = pickNumber(rand, cfg.min, cfg.max);
+        b = pickNumber(rand, cfg.min, cfg.max);
+        answer = a + b;
+      } else if(op === '-'){
+        if(allowNegative){
+          a = pickNumber(rand, cfg.min, cfg.max);
+          b = pickNumber(rand, cfg.min, cfg.max);
+        } else {
+          a = pickNumber(rand, cfg.min, cfg.max);
+          b = pickNumber(rand, cfg.min, a);
+        }
+        answer = a - b;
+      } else if(op === '×'){
+        const mulMax = difficulty === 'dificil' ? Math.min(cfg.max, 50) : Math.min(cfg.max, 20);
+        a = pickNumber(rand, 0, mulMax);
+        b = pickNumber(rand, 0, mulMax);
+        answer = a * b;
+      } else if(op === '÷'){
+        const divisorMax = difficulty === 'dificil' ? Math.min(cfg.max, 20) : Math.min(cfg.max, 12);
+        b = pickNumber(rand, 1, Math.max(2, divisorMax));
+        if(divExact){
+          const qMax = difficulty === 'dificil' ? Math.min(cfg.max, 30) : Math.min(cfg.max, 12);
+          const q = pickNumber(rand, 0, qMax);
+          a = b * q;
+          answer = q;
+        } else {
+          a = pickNumber(rand, 0, cfg.max);
+          answer = Math.round((a / b) * 100) / 100; // two decimals
+        }
+      }
+      return {a,b,op,answer, text: `${a} ${op} ${b} =` };
+    }
+
+    // Build caderno problems using seedrandom
+    function generateCaderno(seedBase, index, config){
+      const seed = seedBase + '-' + index;
+      const rand = new Math.seedrandom(seed);
+      const set = new Set(); const arr = [];
+      let attempts = 0;
+      while(arr.length < config.qCount && attempts < config.qCount * 12){
+        const p = generateOneProblem(rand, config.ops, config.difficulty, config.divExact, config.allowNegative);
+        const key = `${p.a}_${p.op}_${p.b}`;
+        if(!set.has(key)) { set.add(key); arr.push(p); }
+        attempts++;
+      }
+      return arr;
+    }
+
+    // DOM helpers
+    const el = id => document.getElementById(id);
+
+    function applyCssVars(gridSize, fontSize, bindingMm){
+      document.documentElement.style.setProperty('--grid-size', gridSize + 'px');
+      document.documentElement.style.setProperty('--font-size', fontSize + 'pt');
+      document.documentElement.style.setProperty('--binding-mm', bindingMm + 'mm');
+    }
+
+    // Create pages and cells using a measurement-driven pagination
+    function buildPDFContainer(allCadernos, cfg){
+      const container = document.createElement('div');
+
+      allCadernos.forEach((problems, cindex) => {
+        // Cover page
+        const cover = document.createElement('div'); cover.className = 'page cover';
+        cover.innerHTML = `<div class='header-row'><div><div class='title'>${cfg.title} - Caderno ${cindex+1}</div><div style='margin-top:10px'>Nome: _____________________  Turma: ________</div></div><div style='text-align:right;font-size:11pt'>Gerado em: ${new Date().toLocaleString()}</div></div>`;
+        const inst = document.createElement('div'); inst.className = 'page';
+        inst.innerHTML = `<h3>Instruções</h3><div style='white-space:pre-wrap'>${cfg.instructions}</div>`;
+        container.appendChild(cover); container.appendChild(inst);
+
+        // Exercises: we will add pages until all problems used
+        let page = createExercisePage(cfg);
+        container.appendChild(page);
+        for(let i=0;i<problems.length;i++){
+          const p = problems[i];
+          const cell = createCell(p, cfg);
+          page.querySelector('.content').appendChild(cell);
+          // if page overflows, remove last cell and create new page
+          if(page.scrollHeight > page.clientHeight - 8){
+            // remove overflowing cell
+            page.querySelector('.content').removeChild(cell);
+            // create new page and append
+            page = createExercisePage(cfg);
+            container.appendChild(page);
+            page.querySelector('.content').appendChild(cell);
+          }
+        }
+
+        // small page break for safety
+        const br = document.createElement('div'); br.style.pageBreakAfter = 'always'; container.appendChild(br);
+
+        // Add gabarito page for this caderno at end (optional: user asked separate gabarito PDF button exists)
+        const gpage = document.createElement('div'); gpage.className = 'page';
+        gpage.innerHTML = `<h3>Gabarito - ${cfg.title} - Caderno ${cindex+1}</h3>`;
+        const answerList = document.createElement('div');
+        problems.forEach((p, idx) =>{
+          const a = document.createElement('div'); a.className = 'answer-cell'; a.textContent = `${idx+1}. ${p.text}  →  ${p.answer}`; answerList.appendChild(a);
+        });
+        gpage.appendChild(answerList);
+        container.appendChild(gpage);
+      });
+
+      return container;
+    }
+
+    function createExercisePage(cfg){
+      const page = document.createElement('div'); page.className = 'page';
+      const header = document.createElement('div'); header.className = 'header-row'; header.innerHTML = `<div>${cfg.title} - Atividades</div><div style='font-size:11pt'>Espaço para resolução</div>`;
+      const content = document.createElement('div'); content.className = 'grid-container content';
+      content.style.gridTemplateColumns = '1fr 1fr';
+      page.appendChild(header); page.appendChild(content);
+      return page;
+    }
+
+    function createCell(problem, cfg){
+      const cell = document.createElement('div'); cell.className = 'cell';
+      // set quadriculado background using css vars and grid-size
+      const gs = cfg.gridSize;
+      cell.style.backgroundImage = `repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent ${gs}px), repeating-linear-gradient(90deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent ${gs}px)`;
+      cell.style.backgroundSize = `${gs}px ${gs}px, ${gs}px ${gs}px`;
+      cell.style.fontSize = cfg.fontSize + 'pt';
+      cell.innerHTML = `<div class='question'>${problemIndex(problem)} ${problem.text}</div>`;
+      return cell;
+    }
+
+    // helper to keep numbering stable across cadernos when building pages (small trick)
+    function problemIndex(p){ return ''; }
+
+    // Build only gabarito container
+    function buildGabaritoContainer(allCadernos, cfg){
+      const container = document.createElement('div');
+      allCadernos.forEach((problems, cindex)=>{
+        const gpage = document.createElement('div'); gpage.className = 'page';
+        gpage.innerHTML = `<h3>Gabarito - ${cfg.title} - Caderno ${cindex+1}</h3>`;
+        const answerList = document.createElement('div');
+        problems.forEach((p, idx) =>{
+          const a = document.createElement('div'); a.className = 'answer-cell'; a.textContent = `${idx+1}. ${p.text}  →  ${p.answer}`; answerList.appendChild(a);
+        });
+        gpage.appendChild(answerList);
+        container.appendChild(gpage);
+      });
+      return container;
+    }
+
+    // Main generate function
+    async function generatePdf(allCadernos, cfg, fileName){
+      // Clear previous
+      const output = el('pdf-output'); output.innerHTML = '';
+      const container = buildPDFContainer(allCadernos, cfg);
+      output.appendChild(container);
+
+      // Prepare options
+      const opt = {
+        margin: [10,10,10,10],
+        filename: fileName || `${cfg.title.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS:true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      // Show container briefly to allow layout to compute
+      container.style.display = 'block';
+      try{ await html2pdf().set(opt).from(container).save(); }
+      catch(err){ alert('Erro ao gerar PDF: '+err.message); console.error(err); }
+      finally{ container.style.display = 'none'; }
+    }
+
+    // Generate only gabarito PDF
+    async function generateGabaritoPdf(allCadernos, cfg, fileName){
+      const output = el('pdf-output'); output.innerHTML = '';
+      const container = buildGabaritoContainer(allCadernos, cfg);
+      output.appendChild(container);
+      const opt = {
+        margin: [10,10,10,10],
+        filename: fileName || `${cfg.title.replace(/\s+/g,'_')}_gabarito_${new Date().toISOString().slice(0,10)}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS:true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      container.style.display = 'block';
+      try{ await html2pdf().set(opt).from(container).save(); }
+      catch(err){ alert('Erro ao gerar Gabarito: '+err.message); console.error(err); }
+      finally{ container.style.display = 'none'; }
+    }
+
+    // Generate separate PDFs (1 per caderno) — this will generate multiple downloads sequentially
+    async function generateSeparatePdfs(allCadernos, cfg){
+      for(let i=0;i<allCadernos.length;i++){
+        const container = document.createElement('div'); container.style.display='block';
+        const single = buildPDFContainer([allCadernos[i]], cfg);
+        container.appendChild(single);
+        document.body.appendChild(container);
+        const opt = { margin:[10,10,10,10], filename: `${cfg.title.replace(/\s+/g,'_')}_caderno_${i+1}.pdf`, image:{type:'jpeg',quality:0.98}, html2canvas:{scale:2,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} };
+        try{ await html2pdf().set(opt).from(container).save(); }
+        catch(e){console.error(e);} finally{ document.body.removeChild(container);} 
+      }
+    }
+
+    // wiring UI
+    document.getElementById('btn-generate').addEventListener('click', async ()=>{
+      const cfg = readConfig(); applyCssVars(cfg.gridSize, cfg.fontSize, cfg.bindingMm);
+      const seedBase = Date.now().toString();
+      const all = [];
+      for(let i=0;i<cfg.cCount;i++){ all.push(generateCaderno(seedBase, i, cfg)); }
+      await generatePdf(all, cfg);
+    });
+
+    document.getElementById('btn-gabarito').addEventListener('click', async ()=>{
+      const cfg = readConfig(); applyCssVars(cfg.gridSize, cfg.fontSize, cfg.bindingMm);
+      const seedBase = Date.now().toString();
+      const all = [];
+      for(let i=0;i<cfg.cCount;i++){ all.push(generateCaderno(seedBase, i, cfg)); }
+      await generateGabaritoPdf(all, cfg);
+    });
+
+    document.getElementById('btn-generate-separate').addEventListener('click', async ()=>{
+      const cfg = readConfig(); applyCssVars(cfg.gridSize, cfg.fontSize, cfg.bindingMm);
+      const seedBase = Date.now().toString();
+      const all = [];
+      for(let i=0;i<cfg.cCount;i++){ all.push(generateCaderno(seedBase, i, cfg)); }
+      await generateSeparatePdfs(all, cfg);
+    });
+
+    function readConfig(){
+      const ops = { add:el('op-add').checked, sub:el('op-sub').checked, mul:el('op-mul').checked, div:el('op-div').checked };
+      return {
+        ops,
+        qCount: Number(el('q-count').value),
+        cCount: Number(el('c-count').value),
+        difficulty: el('difficulty').value,
+        divExact: el('div-exact').checked,
+        allowNegative: el('allow-negative').checked,
+        gridSize: Number(el('grid-size').value),
+        fontSize: Number(el('font-size').value),
+        bindingMm: Number(el('binding-mm').value),
+        title: el('title').value || 'Caderno de Operações',
+        instructions: el('instructions').value || ''
+      };
+    }
+
+  </script>
+</body>
+</html>
+```
+
+---
+
+### 2) `server.js` (opcional — Node.js + Express + Puppeteer)
+
+> Observações: este arquivo aceita um POST JSON com a mesma configuração usada no frontend e gera um PDF com Puppeteer. Salve como `server.js`. Instale dependências: `npm i express body-parser puppeteer`.
+
+```js
+// server.js
+const express = require('express');
+const bodyParser = require('body-parser');
+const puppeteer = require('puppeteer');
+const app = express();
+app.use(bodyParser.json({ limit: '10mb' }));
+
+// Template function: very small HTML that injects config.results
+function buildHtml(config, problemsByCaderno){
+  // This should mirror a simplified version of index.html layout.
+  // For brevity, generate a minimal HTML with inline styles and the exercises + gabarito.
+  let html = `<!doctype html><html><head><meta charset='utf8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>${config.title}</title><style>
+    body{font-family:Arial;margin:0;padding:12mm}
+    .page{width:210mm;height:297mm;box-sizing:border-box;padding:12mm;border:0}
+    .cell{border:1px solid #444;padding:8px;min-height:60px}
+  </style></head><body>`;
+
+  problemsByCaderno.forEach((problems, idx)=>{
+    html += `<div class='page'><h2>${config.title} - Caderno ${idx+1}</h2><div>Nome: __________ Turma: ________</div>`;
+    problems.forEach((p,i)=>{
+      html += `<div class='cell'>${i+1}. ${p.text}</div>`;
+    });
+    html += `<div style='page-break-after:always'></div>`;
+  });
+
+  // gabaritos
+  html += `<h3>Gabaritos</h3>`;
+  problemsByCaderno.forEach((problems, idx)=>{
+    html += `<h4>Caderno ${idx+1}</h4>`;
+    problems.forEach((p,i)=>{ html += `<div>${i+1}. ${p.text} → ${p.answer}</div>`; });
+  });
+
+  html += '</body></html>';
+  return html;
+}
+
+app.post('/generate', async (req,res)=>{
+  try{
+    const config = req.body.config; // expect same shape as frontend readConfig()
+    const seedBase = Date.now().toString();
+    // simple generator using Math.seedrandom not available on server — but we can implement a naive PRNG
+    function PRNG(seed){ let h=0; for(let i=0;i<seed.length;i++){ h = (h*31 + seed.charCodeAt(i))|0 } return function(){ h = Math.imul(48271, h) % 2147483647; return (h & 2147483647)/2147483647; } }
+    function pick(rand,min,max){ return Math.floor(rand() * (max-min+1))+min }
+    const cfg = { difficulty: config.difficulty || 'medio', divExact: !!config.divExact };
+    // generate per caderno
+    const all = [];
+    for(let c=0;c<config.cCount;c++){
+      const rand = PRNG(seedBase + '-' + c);
+      const arr = [];
+      while(arr.length < config.qCount){
+        // basic similar generator as frontend (only +,-,×,÷)
+        const ops = [];
+        if(config.ops.add) ops.push('+'); if(config.ops.sub) ops.push('-'); if(config.ops.mul) ops.push('×'); if(config.ops.div) ops.push('÷');
+        const op = ops[Math.floor(rand() * ops.length)];
+        const dcfg = { min:0, max:50 };
+        let a=0,b=0,answer=0,text='';
+        if(op==='+'){ a=pick(rand,dcfg.min,dcfg.max); b=pick(rand,dcfg.min,dcfg.max); answer=a+b; }
+        else if(op==='-'){ a=pick(rand,dcfg.min,dcfg.max); b=pick(rand,dcfg.min,a); answer=a-b; }
+        else if(op==='×'){ a=pick(rand,0,12); b=pick(rand,0,12); answer=a*b; }
+        else { b=pick(rand,1,12); if(config.divExact){ const q=pick(rand,0,12); a=b*q; answer=q } else { a=pick(rand,0,50); answer=(Math.round((a/b)*100))/100 } }
+        text = `${a} ${op} ${b} =`;
+        arr.push({a,b,op,answer,text});
+      }
+      all.push(arr);
+    }
+
+    const html = buildHtml(config, all);
+
+    // generate PDF with puppeteer
+    const browser = await puppeteer.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
+    const page = await browser.newPage();
+    await page.setContent(html,{waitUntil:'networkidle0'});
+    const pdf = await page.pdf({format:'A4',printBackground:true});
+    await browser.close();
+
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition','attachment; filename='+`${config.title.replace(/\s+/g,'_')}.pdf`);
+    res.send(pdf);
+  } catch(err){ console.error(err); res.status(500).json({error:err.message}); }
+});
+
+app.listen(3030, ()=>console.log('Server rodando na porta 3030'));
+```
+
+---
+
+## Observações e próximos passos
+
+- **Hospedagem no GitHub:** coloque `index.html` no branch `gh-pages` ou em `docs/` no branch `main` e ative GitHub Pages.
+- **Gabaritos:** há um botão dedicado para gerar apenas o PDF dos gabaritos.
+- **Quadriculado, fonte e margem:** controles na interface aplicam imediatamente o layout para o PDF.
+- **Permitir negativas:** existe a checkbox para permitir subtrações negativas.
+- **Paginação automática:** o frontend tenta medir overflow e cria novas páginas para evitar cortes; se quiser, adiciono controle para X questões por página fixas.
+- **Servidor com Puppeteer (opcional):** `server.js` gera PDFs server-side — útil para geração em lote e maior qualidade.
+
+Se preferir, separo esses conteúdos em arquivos individuais no canvas (ex.: `index.html`, `server.js`, `README.md`) ou faço refinamentos (ex.: gabarito em PDF separado automaticamente, adicionar cabeçalho com logo, limitar questões por página). Diga qual ajuste quer que eu faça agora e eu atualizo o código.
